@@ -37,7 +37,7 @@ export const SUPPORT_MODELS : SupportModelConfigItem[] = [
 
 export const DEFAULT_MODEL : string = "qwen2.5-0.5b-instruct"
 
-export const API_PREFIX : string = "http://127.0.0.1:5000"
+export const API_PREFIX : string = "http://127.0.0.1:8000"
 
 export default {
     SUPPORT_MODELS,
