@@ -8,6 +8,8 @@ The **PolyU Video Agent** is an advanced AI system designed to process video inp
 
 The system leverages multimodal AI techniques to handle video, audio, and text data, transforming raw video inputs into structured, searchable knowledge.
 
+![](screenshot/transcript.png)
+
 ---
 
 ## Algorithm Overview
