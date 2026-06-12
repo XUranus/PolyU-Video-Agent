@@ -27,6 +27,33 @@ logger = logging.getLogger('LectureMind')
 import datetime
 from pathlib import Path
 
+_llm_logger = None
+
+def _get_llm_logger():
+    """Get or create a dedicated LLM call logger with file rotation."""
+    global _llm_logger
+    if _llm_logger is not None:
+        return _llm_logger
+    try:
+        from logging.handlers import RotatingFileHandler
+        log_dir = Path(__file__).resolve().parent.parent / "logs" / "llm_calls"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        _llm_logger = logging.getLogger('LectureMind.llm_calls')
+        _llm_logger.setLevel(logging.DEBUG)
+        _llm_logger.propagate = False
+        if not _llm_logger.handlers:
+            handler = RotatingFileHandler(
+                log_dir / "llm_calls.log",
+                maxBytes=50 * 1024 * 1024,  # 50 MB
+                backupCount=5,
+            )
+            handler.setFormatter(logging.Formatter('%(message)s'))
+            _llm_logger.addHandler(handler)
+    except Exception:
+        _llm_logger = logging.getLogger('LectureMind.llm_calls')
+    return _llm_logger
+
+
 def _log_llm_call(
     method: str,
     messages: list,
@@ -38,12 +65,10 @@ def _log_llm_call(
     error: str = None,
     duration_ms: float = None,
 ):
-    """Log every LLM call to an independent file for debugging."""
+    """Log every LLM call as a JSON line for debugging."""
     try:
-        log_dir = Path(__file__).resolve().parent.parent / "logs" / "llm_calls"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        log_file = log_dir / f"{ts}_{method}.json"
+        import json as _json
+        llm_log = _get_llm_logger()
         log_entry = {
             "timestamp": datetime.datetime.now().isoformat(),
             "method": method,
@@ -51,13 +76,12 @@ def _log_llm_call(
             "temperature": temperature,
             "max_tokens": max_tokens,
             "messages": messages,
-            "response": response_text[:5000] if response_text else None,
+            "response": response_text[:2000] if response_text else None,
             "usage": usage,
             "error": error,
-            "duration_ms": duration_ms,
+            "duration_ms": round(duration_ms, 1) if duration_ms else None,
         }
-        with open(log_file, "w", encoding="utf-8") as f:
-            json.dump(log_entry, f, indent=2, ensure_ascii=False, default=str)
+        llm_log.info(_json.dumps(log_entry, ensure_ascii=False, default=str))
     except Exception as e:
         logger.debug(f"Failed to log LLM call: {e}")
 

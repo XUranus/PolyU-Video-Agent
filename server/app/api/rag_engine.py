@@ -22,6 +22,8 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, Generator, Tuple
 
+from api.utils import format_time
+
 logger = logging.getLogger('LectureMind')
 
 
@@ -46,11 +48,6 @@ RAG_CONTEXT_TEMPLATE = """## Lecture Context
 
 ---
 Student Question: {question}"""
-
-
-def _format_time(seconds: float) -> str:
-    m, s = int(seconds // 60), int(seconds % 60)
-    return f"{m:02d}:{s:02d}"
 
 
 class RAGEngine:
@@ -108,7 +105,7 @@ class RAGEngine:
             if len(citations) >= self.top_k:
                 break
 
-            time_range = f"{_format_time(begin_time)} - {_format_time(end_time)}"
+            time_range = f"{format_time(begin_time)} - {format_time(end_time)}"
             text_preview = result.get("text", "")[:600]  # Slightly longer context
 
             sources_lines.append(

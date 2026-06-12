@@ -338,3 +338,42 @@ def generate_master_playlist(
     #     output_root="./media/streams",
     #     output_filename="master-stream.m3u8"
     # )
+
+
+import re
+import json
+import logging
+
+logger = logging.getLogger('LectureMind')
+
+
+def format_time(seconds: float) -> str:
+    """Format seconds into MM:SS string."""
+    m, s = int(seconds // 60), int(seconds % 60)
+    return f"{m:02d}:{s:02d}"
+
+
+def parse_llm_json(response_text: str) -> dict:
+    """
+    Parse JSON from LLM response text, handling markdown fences and embedded JSON.
+
+    Tries:
+    1. Direct JSON parse after stripping markdown fences
+    2. Regex extraction of first {...} block
+    3. Raises ValueError if neither works
+    """
+    cleaned = response_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r'^```\w*\n?', '', cleaned)
+        cleaned = re.sub(r'\n?```$', '', cleaned)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r'\{.*\}', cleaned, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group())
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"Could not parse JSON from LLM: {response_text[:300]}")

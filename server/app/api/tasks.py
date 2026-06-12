@@ -3,15 +3,13 @@
 Async task implementations. All functions accept/return Dict[str, Any].
 """
 import logging
-import re
 from typing import Dict, Any, Callable, List
 from django.utils import timezone
-import json
 import os
 import uuid
 from django.core.files import File
 from django.conf import settings
-from api.utils import generate_thumbnails_for_video, get_local_file_path
+from api.utils import generate_thumbnails_for_video, get_local_file_path, format_time, parse_llm_json
 from api.models import (
     Video, Thumbnail, VideoTranscript, TranscriptSentence,
     VideoSection, KnowledgePoint, KnowledgeSummary, KnowledgeMindmap, SlideOCR,
@@ -236,23 +234,6 @@ def _find_closest_thumbnail(video_id: str, time_sec: float):
     return closest
 
 
-def _parse_llm_json(response_text: str) -> Dict[str, Any]:
-    cleaned = response_text.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r'^```\w*\n?', '', cleaned)
-        cleaned = re.sub(r'\n?```$', '', cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    m = re.search(r'\{.*\}', cleaned, re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group())
-        except json.JSONDecodeError:
-            pass
-    raise ValueError(f"Could not parse JSON from LLM: {response_text[:300]}")
-
 
 
 def _report_progress(video_id: str, func_name: str, progress: int) -> None:
@@ -265,9 +246,6 @@ def _report_progress(video_id: str, func_name: str, progress: int) -> None:
     except Exception as e:
         logger.debug(f"Failed to update progress: {e}")
 
-
-def _format_time(seconds: float) -> str:
-    return f"{int(seconds // 60):02d}:{int(seconds % 60):02d}"
 
 
 def _tree_to_react_flow(tree: Dict[str, Any], x: float = 0, y: float = 0,
@@ -544,6 +522,7 @@ def task_fine_grained_knowledge(input_data: Dict[str, Any]) -> Dict[str, Any]:
     if not sections.exists():
         return {"video_id": video_id, "knowledge_points_count": 0, "sections_processed": 0}
 
+    total_sections = sections.count()
     llm = get_llm_client()
     KnowledgePoint.objects.filter(video_id=video_id).delete()
     total_kp, processed = 0, 0
@@ -551,7 +530,7 @@ def task_fine_grained_knowledge(input_data: Dict[str, Any]) -> Dict[str, Any]:
     for section in sections:
         if not section.transcript_text or len(section.transcript_text.strip()) < 20:
             continue
-        time_range = f"{_format_time(section.begin_time)} - {_format_time(section.end_time)}"
+        time_range = f"{format_time(section.begin_time)} - {format_time(section.end_time)}"
         transcript = section.transcript_text[:3000]
         if len(section.transcript_text) > 3000:
             transcript += "... [truncated]"
@@ -565,7 +544,7 @@ def task_fine_grained_knowledge(input_data: Dict[str, Any]) -> Dict[str, Any]:
                 system_prompt="You are an expert educational content analyst. Respond with valid JSON only.",
                 temperature=0.3, max_tokens=2048,
             )
-            data = _parse_llm_json(response)
+            data = parse_llm_json(response)
             new_title = data.get("section_title", "").strip()
             if new_title:
                 section.title = new_title
@@ -583,7 +562,7 @@ def task_fine_grained_knowledge(input_data: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 total_kp += 1
             processed += 1
-            _report_progress(video_id, "task_fine_grained_knowledge", int((processed) / sections.count() * 100))
+            _report_progress(video_id, "task_fine_grained_knowledge", int((processed) / total_sections * 100))
         except Exception as e:
             logger.error(f"[Fine-Grained] Section {section.order} failed: {e}")
             continue
@@ -652,7 +631,7 @@ def task_embed_knowledge(input_data: Dict[str, Any]) -> Dict[str, Any]:
             "video_id": video_id,
             "section_id": str(matching_section.id) if matching_section else "",
             "type": "slide_ocr",
-            "title": f"Slide @ {_format_time(ocr.time_second)}",
+            "title": f"Slide @ {format_time(ocr.time_second)}",
             "begin_time": ocr.time_second,
             "end_time": ocr.time_second,
         })
@@ -684,7 +663,7 @@ def task_coarse_grained_summary(input_data: Dict[str, Any]) -> Dict[str, Any]:
     # Build sections text for the prompt
     sections_lines = []
     for s in sections:
-        time_range = f"{_format_time(s.begin_time)}-{_format_time(s.end_time)}"
+        time_range = f"{format_time(s.begin_time)}-{format_time(s.end_time)}"
         section_kps = [kp for kp in kps if str(kp.section_id) == str(s.id)]
         kp_text = ""
         if section_kps:
@@ -711,7 +690,7 @@ def task_coarse_grained_summary(input_data: Dict[str, Any]) -> Dict[str, Any]:
             system_prompt="You are an expert educational content analyst. Respond with valid JSON only.",
             temperature=0.3, max_tokens=2048,
         )
-        data = _parse_llm_json(response)
+        data = parse_llm_json(response)
     except Exception as e:
         logger.error(f"[Coarse Summary] LLM call failed: {e}")
         data = {
@@ -752,7 +731,7 @@ def task_generate_mindmap(input_data: Dict[str, Any]) -> Dict[str, Any]:
     # Build sections text
     sections_lines = []
     for s in sections:
-        time_range = f"{_format_time(s.begin_time)}-{_format_time(s.end_time)}"
+        time_range = f"{format_time(s.begin_time)}-{format_time(s.end_time)}"
         section_kps = [kp for kp in kps if str(kp.section_id) == str(s.id)]
         kp_text = ""
         if section_kps:
@@ -779,7 +758,7 @@ def task_generate_mindmap(input_data: Dict[str, Any]) -> Dict[str, Any]:
             system_prompt="You are an expert educational content analyst. Respond with valid JSON only.",
             temperature=0.4, max_tokens=3000,
         )
-        tree_data = _parse_llm_json(response)
+        tree_data = parse_llm_json(response)
     except Exception as e:
         logger.error(f"[Mindmap] LLM call failed: {e}")
         # Fallback: build a simple tree from sections
@@ -850,6 +829,8 @@ def task_slides_ocr(input_data: Dict[str, Any]) -> Dict[str, Any]:
     ocr_count = 0
     skipped = 0
 
+    total_thumbs = thumbnails.count()
+
     for thumb in thumbnails:
         if not thumb.image:
             skipped += 1
@@ -905,7 +886,6 @@ def task_slides_ocr(input_data: Dict[str, Any]) -> Dict[str, Any]:
                 time_second=thumb.time_second,
             )
             ocr_count += 1
-            total_thumbs = thumbnails.count()
             logger.info(
                 f"[Slides OCR] Extracted {len(ocr_text)} chars from slide @ {thumb.time_second}s "
                 f"({ocr_count}/{total_thumbs})"

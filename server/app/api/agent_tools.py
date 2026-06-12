@@ -12,12 +12,9 @@ import json
 import logging
 from typing import List, Dict, Any
 
+from api.utils import format_time
+
 logger = logging.getLogger('LectureMind')
-
-
-def _format_time(seconds: float) -> str:
-    m, s = int(seconds // 60), int(seconds % 60)
-    return f"{m:02d}:{s:02d}"
 
 
 def make_tools(video_id: str) -> List[Dict[str, Any]]:
@@ -208,7 +205,7 @@ def _tool_search_knowledge(video_id: str, query: str, top_k: int = 5) -> str:
 
         lines.append(
             f"[Result {i+1}] ({ctype}) \"{title}\" "
-            f"[{_format_time(begin)} - {_format_time(end)}] "
+            f"[{format_time(begin)} - {format_time(end)}] "
             f"(relevance: {relevance:.2f})\n{text}"
         )
 
@@ -268,7 +265,7 @@ def _tool_search_slides(video_id: str, query: str, top_k: int = 5) -> str:
             relevance = r.get("relevance", 0)
             text = r.get("text", "")[:500]
             lines.append(
-                f"[Slide {i+1}] [{_format_time(begin)}] "
+                f"[Slide {i+1}] [{format_time(begin)}] "
                 f"(relevance: {relevance:.2f})\n{text}\n"
             )
 
@@ -284,7 +281,7 @@ def _tool_search_slides(video_id: str, query: str, top_k: int = 5) -> str:
                 seen_times.add(time_key)
                 text_preview = slide.ocr_text[:600]
                 lines.append(
-                    f"[Slide @ {_format_time(slide.time_second)}]\n"
+                    f"[Slide @ {format_time(slide.time_second)}]\n"
                     f"{text_preview}\n"
                 )
 
@@ -307,7 +304,7 @@ def _tool_get_section_details(video_id: str, section_order: int) -> str:
 
     result = (
         f"## Section {section.order}: {section.title}\n"
-        f"Time: {_format_time(section.begin_time)} - {_format_time(section.end_time)}\n\n"
+        f"Time: {format_time(section.begin_time)} - {format_time(section.end_time)}\n\n"
         f"### Transcript:\n{section.transcript_text[:2000]}\n\n"
     )
 
@@ -365,7 +362,7 @@ def _tool_list_sections(video_id: str) -> str:
         kp_count = s.knowledge_points.count()
         lines.append(
             f"- **Section {s.order}:** {s.title} "
-            f"[{_format_time(s.begin_time)} - {_format_time(s.end_time)}] "
+            f"[{format_time(s.begin_time)} - {format_time(s.end_time)}] "
             f"({kp_count} knowledge points)"
         )
 
@@ -388,14 +385,14 @@ def _tool_get_transcript_at_time(
     ).order_by('begin_time')
 
     if not sentences.exists():
-        return f"No transcript found around {_format_time(time_seconds)}."
+        return f"No transcript found around {format_time(time_seconds)}."
 
     lines = [
-        f"# Transcript around {_format_time(time_seconds)} "
+        f"# Transcript around {format_time(time_seconds)} "
         f"(window: {window_seconds}s)\n"
     ]
     for s in sentences:
-        t = _format_time(s.begin_time / 1000)
+        t = format_time(s.begin_time / 1000)
         lines.append(f"[{t}] {s.text}")
 
     return "\n".join(lines)

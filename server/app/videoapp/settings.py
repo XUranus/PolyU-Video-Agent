@@ -20,21 +20,30 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ── Load .env file ──────────────────────────────────────────────
 # Works for both `manage.py runserver` and `manage.py process_async_task`
 def _load_dotenv(base: Path):
-    for candidate in [base / '.env', base.parent / '.env', base.parent.parent / '.env']:
-        if candidate.is_file():
-            with open(candidate) as _f:
-                for _line in _f:
-                    _line = _line.strip()
-                    if not _line or _line.startswith('#') or '=' not in _line:
-                        continue
-                    _k, _v = _line.split('=', 1)
-                    _k = _k.strip()
-                    _v = _v.strip().strip("'").strip('"')
-                    if ' #' in _v:
-                        _v = _v.split(' #')[0].strip().strip("'").strip('"')
-                    if _k not in os.environ:
-                        os.environ[_k] = _v
-            break
+    """Load .env file using python-dotenv if available, else fall back to manual parsing."""
+    try:
+        from dotenv import load_dotenv
+        for candidate in [base / '.env', base.parent / '.env', base.parent.parent / '.env']:
+            if candidate.is_file():
+                load_dotenv(candidate, override=False)
+                return
+    except ImportError:
+        # Fallback: manual parsing
+        for candidate in [base / '.env', base.parent / '.env', base.parent.parent / '.env']:
+            if candidate.is_file():
+                with open(candidate) as _f:
+                    for _line in _f:
+                        _line = _line.strip()
+                        if not _line or _line.startswith('#') or '=' not in _line:
+                            continue
+                        _k, _v = _line.split('=', 1)
+                        _k = _k.strip()
+                        _v = _v.strip().strip("'").strip('"')
+                        if ' #' in _v:
+                            _v = _v.split(' #')[0].strip().strip("'").strip('"')
+                        if _k not in os.environ:
+                            os.environ[_k] = _v
+                return
 
 _load_dotenv(BASE_DIR)
 
@@ -42,11 +51,15 @@ _load_dotenv(BASE_DIR)
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-0037%n_gby*ph4b7o(iaw)g!wbk5+-=b_y&p+d^dhhb7a0lvo_')
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True').lower() not in ('false', '0', 'no')
+
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.environ.get('SECRET_KEY', '')
+if not SECRET_KEY:
+    if not DEBUG:
+        raise RuntimeError("SECRET_KEY environment variable is required in production")
+    SECRET_KEY = 'django-insecure-dev-only-key-change-in-production'
 
 _allowed = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1')
 ALLOWED_HOSTS = [h.strip() for h in _allowed.split(',') if h.strip()]
@@ -153,7 +166,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # Media files (for uploads)
-import os
 MEDIA_URL = os.environ.get('MEDIA_URL', '/media/')
 _media_root = os.environ.get('MEDIA_ROOT', '')
 MEDIA_ROOT = _media_root if _media_root else os.path.join(BASE_DIR, 'media')
@@ -162,12 +174,9 @@ MEDIA_ROOT = _media_root if _media_root else os.path.join(BASE_DIR, 'media')
 _cors_origins = os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3000')
 CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins.split(',') if o.strip()]
 
-CORS_ALLOW_ALL_ORIGINS = True
-
 # Unified logging — both web server and task worker write to the same log directory
-import os as _os
-LOG_DIR = _os.environ.get('LOG_DIR', '') or _os.path.join(BASE_DIR, 'logs')
-_os.makedirs(LOG_DIR, exist_ok=True)
+LOG_DIR = os.environ.get('LOG_DIR', '') or os.path.join(BASE_DIR, 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
 
 LOGGING = {
     'version': 1,
@@ -186,7 +195,7 @@ LOGGING = {
         },
         'app_file': {
             'class': 'logging.handlers.RotatingFileHandler',
-            'filename': _os.path.join(LOG_DIR, 'app.log'),
+            'filename': os.path.join(LOG_DIR, 'app.log'),
             'maxBytes': 20 * 1024 * 1024,  # 20 MB
             'backupCount': 5,
             'formatter': 'verbose',
@@ -194,7 +203,7 @@ LOGGING = {
         },
         'task_file': {
             'class': 'logging.handlers.RotatingFileHandler',
-            'filename': _os.path.join(LOG_DIR, 'task_processor.log'),
+            'filename': os.path.join(LOG_DIR, 'task_processor.log'),
             'maxBytes': 20 * 1024 * 1024,
             'backupCount': 5,
             'formatter': 'verbose',
@@ -202,7 +211,7 @@ LOGGING = {
         },
         'error_file': {
             'class': 'logging.handlers.RotatingFileHandler',
-            'filename': _os.path.join(LOG_DIR, 'errors.log'),
+            'filename': os.path.join(LOG_DIR, 'errors.log'),
             'maxBytes': 10 * 1024 * 1024,
             'backupCount': 3,
             'formatter': 'verbose',
@@ -231,17 +240,17 @@ LOGGING = {
 # ── Media sub-directories ────────────────────────────────────────────────────
 # Resolved as absolute paths under MEDIA_ROOT unless an absolute path is given.
 def _media_subdir(env_var: str, default: str) -> str:
-    val = _os.environ.get(env_var, default)
-    if _os.path.isabs(val):
+    val = os.environ.get(env_var, default)
+    if os.path.isabs(val):
         return val
-    return _os.path.join(MEDIA_ROOT, val)
+    return os.path.join(MEDIA_ROOT, val)
 
 MEDIA_AUDIO_DIR      = _media_subdir('MEDIA_AUDIO_DIR',      'audio')
 MEDIA_STREAMS_DIR    = _media_subdir('MEDIA_STREAMS_DIR',    'streams')
 MEDIA_THUMBNAILS_DIR = _media_subdir('MEDIA_THUMBNAILS_DIR', 'thumbnails')
 
 # ChromaDB persistent directory
-CHROMA_PERSIST_DIR = _os.environ.get('CHROMA_PERSIST_DIR', '') or _os.path.join(MEDIA_ROOT, 'chromadb')
+CHROMA_PERSIST_DIR = os.environ.get('CHROMA_PERSIST_DIR', '') or os.path.join(MEDIA_ROOT, 'chromadb')
 
 # Backend port used by `manage.py runserver` via the run_server management helper
-BACKEND_PORT = int(_os.environ.get('BACKEND_PORT', 8000))
+BACKEND_PORT = int(os.environ.get('BACKEND_PORT', 8000))

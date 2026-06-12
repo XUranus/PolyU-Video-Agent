@@ -14,5 +14,8 @@ server/app/videoapp/__pycache__
 server/app/logs
 server/app/*.log
 doc/
+docs/node_modules/
+docs/build/
+docs/.docusaurus/
 opencode.json
 report_backup/

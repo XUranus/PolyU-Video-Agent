@@ -1,0 +1,70 @@
+:root {
+  --ifm-color-primary: #667eea;
+  --ifm-color-primary-dark: #5a6fd6;
+  --ifm-color-primary-darker: #5469c9;
+  --ifm-color-primary-darkest: #4556a4;
+  --ifm-color-primary-light: #7289ee;
+  --ifm-color-primary-lighter: #7e93f0;
+  --ifm-color-primary-lightest: #a3b2f5;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #8b9cf7;
+  --ifm-color-primary-dark: #7488f5;
+  --ifm-color-primary-darker: #687ef4;
+  --ifm-color-primary-darkest: #3d5aef;
+  --ifm-color-primary-light: #a2b0f9;
+  --ifm-color-primary-lighter: #aebafa;
+  --ifm-color-primary-lightest: #d4dcfd;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+/* Mermaid diagram styling */
+.mermaid {
+  text-align: center;
+  margin: 1.5rem 0;
+}
+
+/* Interactive demo containers */
+.demo-container {
+  border: 2px solid var(--ifm-color-primary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  background: var(--ifm-background-surface-color);
+}
+
+.demo-container h4 {
+  margin-top: 0;
+  color: var(--ifm-color-primary);
+}
+
+/* Animated pipeline steps */
+@keyframes pulse-step {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.05); opacity: 1; }
+}
+
+.pipeline-step {
+  animation: pulse-step 2s ease-in-out infinite;
+}
+
+/* Info cards */
+.info-card {
+  border-left: 4px solid var(--ifm-color-primary);
+  padding: 1rem 1.5rem;
+  margin: 1rem 0;
+  background: var(--ifm-background-surface-color);
+  border-radius: 0 8px 8px 0;
+}
+
+/* Flowchart node highlights */
+.flow-highlight {
+  background: linear-gradient(135deg, #667eea22, #764ba222);
+  border: 2px solid var(--ifm-color-primary);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+}

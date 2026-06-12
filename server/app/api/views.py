@@ -94,6 +94,28 @@ class VideoUploadView(generics.CreateAPIView):
     serializer_class = VideoUploadSerializer
     parser_classes = [MultiPartParser, FormParser]
     def post(self, request, *args, **kwargs) -> Response:
+        # Validate file
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check file extension
+        allowed_extensions = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv'}
+        ext = os.path.splitext(uploaded_file.name)[1].lower()
+        if ext not in allowed_extensions:
+            return Response(
+                {"error": f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(allowed_extensions))}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check file size (max 5GB)
+        max_size = 5 * 1024 * 1024 * 1024
+        if uploaded_file.size > max_size:
+            return Response(
+                {"error": f"File too large ({uploaded_file.size / 1024 / 1024 / 1024:.1f}GB). Maximum: 5GB"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
             os.makedirs(os.path.join(settings.MEDIA_ROOT, "videos"), exist_ok=True)
@@ -238,7 +260,7 @@ class ChatSessionListCreateView(generics.ListCreateAPIView):
     serializer_class = ChatSessionSerializer
 
     def get_queryset(self):
-        return ChatSession.objects.filter(video_id=self.kwargs['video_id'])
+        return ChatSession.objects.filter(video_id=self.kwargs['video_id']).prefetch_related('messages')
 
     def perform_create(self, serializer):
         serializer.save(video_id=self.kwargs['video_id'])
@@ -261,6 +283,8 @@ class ChatMessageListView(generics.ListAPIView):
         return ChatMessage.objects.filter(session_id=self.kwargs['session_id'])
 
 
+# CSRF exempt: SSE streaming endpoints cannot send CSRF tokens via EventSource.
+# Security should be handled by API key/token authentication instead.
 @csrf_exempt
 @api_view(['POST'])
 def chat_stream_view(request, video_id):
@@ -355,10 +379,10 @@ def chat_stream_view(request, video_id):
             logger.error(f"SSE chat stream error: {e}")
             error_msg = ChatMessage.objects.create(
                 session=session, role='assistant',
-                content=f"I encountered an error processing your question: {str(e)}",
+                content="I encountered an error processing your question. Please try again.",
                 citations=[],
             )
-            yield f"event: error\ndata: {json.dumps({'error': str(e), 'message_id': str(error_msg.id)})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error': 'An error occurred processing your question.', 'message_id': str(error_msg.id)})}\n\n"
 
     response = StreamingHttpResponse(
         sse_generator(),
@@ -370,6 +394,8 @@ def chat_stream_view(request, video_id):
 
 
 # Non-streaming chat fallback
+# CSRF exempt: SSE streaming endpoints cannot send CSRF tokens via EventSource.
+# Security should be handled by API key/token authentication instead.
 @csrf_exempt
 @api_view(['POST'])
 def chat_ask_view(request, video_id):
@@ -477,6 +503,8 @@ class AsyncTaskItemsByVideoView(generics.ListAPIView):
 # AGENT CHAT VIEWS
 # ======================
 
+# CSRF exempt: SSE streaming endpoints cannot send CSRF tokens via EventSource.
+# Security should be handled by API key/token authentication instead.
 @csrf_exempt
 @api_view(['POST'])
 def agent_chat_stream_view(request, video_id):
@@ -565,10 +593,10 @@ def agent_chat_stream_view(request, video_id):
             logger.error(f"Agent SSE error: {e}")
             error_msg = ChatMessage.objects.create(
                 session=session, role='assistant',
-                content=f"Agent error: {str(e)}",
+                content="I encountered an error processing your question. Please try again.",
                 citations=[],
             )
-            yield f"event: error\ndata: {json.dumps({'error': str(e), 'message_id': str(error_msg.id)})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error': 'An error occurred processing your question.', 'message_id': str(error_msg.id)})}\n\n"
 
     response = StreamingHttpResponse(sse_generator(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'
@@ -580,6 +608,8 @@ def agent_chat_stream_view(request, video_id):
 # COURSE (EPISODE) CHAT VIEWS
 # ======================
 
+# CSRF exempt: SSE streaming endpoints cannot send CSRF tokens via EventSource.
+# Security should be handled by API key/token authentication instead.
 @csrf_exempt
 @api_view(['POST'])
 def course_agent_stream_view(request, episode_id):
@@ -633,7 +663,7 @@ def course_agent_stream_view(request, episode_id):
     chat_history = [{"role": m["role"], "content": m["content"]} for m in history[:-1]]
 
     def sse_generator():
-        from api.agent_graph import AgentRunner
+        from api.agent_graph import CourseAgentRunner
 
         # Course-level runner — searches across all video IDs
         runner = CourseAgentRunner(
@@ -670,9 +700,9 @@ def course_agent_stream_view(request, episode_id):
             logger.error(f"Course agent SSE error: {e}")
             error_msg = ChatMessage.objects.create(
                 session=session, role='assistant',
-                content=f"Agent error: {str(e)}", citations=[],
+                content="I encountered an error processing your question. Please try again.", citations=[],
             )
-            yield f"event: error\ndata: {json.dumps({'error': str(e), 'message_id': str(error_msg.id)})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error': 'An error occurred processing your question.', 'message_id': str(error_msg.id)})}\n\n"
 
     response = StreamingHttpResponse(sse_generator(), content_type='text/event-stream')
     response['Cache-Control'] = 'no-cache'
@@ -680,159 +710,12 @@ def course_agent_stream_view(request, episode_id):
     return response
 
 
-class CourseAgentRunner:
-    """
-    Agent runner that searches across multiple videos in a course.
-    Subclasses the core AgentRunner logic but with cross-video tool scope.
-    """
-
-    MAX_ITERATIONS = 5
-
-    def __init__(self, video_ids, episode_title, chat_history=None):
-        self.video_ids = video_ids
-        self.episode_title = episode_title
-        self.chat_history = chat_history or []
-
-    def run_stream(self, question):
-        from api.llm_client import get_llm_client
-        from api.agent_tools import make_tools, execute_tool
-        import re
-
-        COURSE_SYSTEM = f"""You are an expert teaching assistant for a course titled "{self.episode_title}" containing {len(self.video_ids)} lecture videos.
-You help students understand content across ALL lectures in this course.
-
-## Your Process:
-1. **Analyze** the student's question
-2. **Search** across lectures using the available tools — each call searches all lectures in the course
-3. **Synthesize** findings into a comprehensive answer, noting which lecture each piece of information comes from
-
-## Rules:
-- ALWAYS use at least one tool before answering
-- For cross-lecture comparisons, call search_knowledge multiple times with different queries
-- Mention which lecture/section each piece of info is from when citing
-- Use markdown formatting"""
-
-        llm = get_llm_client(model="qwen3-max")
-        tools = make_tools(self.video_ids[0])  # schema is same for any video
-        messages = [{"role": "system", "content": COURSE_SYSTEM}]
-        for msg in self.chat_history[-6:]:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": question})
-
-        tool_steps = []
-
-        for iteration in range(self.MAX_ITERATIONS):
-            yield {"event": "thinking", "data": {"thought": f"Analyzing across {len(self.video_ids)} lectures (step {iteration + 1})..."}}
-
-            response = self._call_with_tools(llm, messages, tools)
-
-            if response["type"] == "text":
-                yield {"event": "thinking", "data": {"thought": "Composing answer..."}}
-                for token in self._stream_final(llm, messages):
-                    yield {"event": "token", "data": {"token": token}}
-                citations = self._extract_citations(tool_steps)
-                yield {"event": "citations", "data": {"citations": citations}}
-                yield {"event": "done", "data": {"tool_steps": tool_steps}}
-                return
-
-            elif response["type"] == "tool_calls":
-                for tc in response["tool_calls"]:
-                    tool_name = tc["function"]["name"]
-                    try:
-                        args = json.loads(tc["function"]["arguments"])
-                    except json.JSONDecodeError:
-                        args = {}
-
-                    yield {"event": "tool_call", "data": {"tool": tool_name, "args": args}}
-
-                    # Execute across ALL videos in course
-                    combined_results = []
-                    for vid in self.video_ids:
-                        result = execute_tool(vid, tool_name, args)
-                        if result and "not found" not in result.lower() and "no relevant" not in result.lower():
-                            combined_results.append(f"[Video {vid[:8]}...] {result[:500]}")
-
-                    merged = "\n\n---\n\n".join(combined_results) if combined_results else "No relevant results found across any lecture."
-                    truncated = merged[:2000]
-
-                    tool_steps.append({"tool": tool_name, "args": args, "result": truncated})
-
-                    yield {"event": "tool_result", "data": {
-                        "tool": tool_name,
-                        "result": truncated[:300] + ("..." if len(truncated) > 300 else ""),
-                    }}
-
-                    messages.append({"role": "assistant", "content": None, "tool_calls": [tc]})
-                    messages.append({"role": "tool", "tool_call_id": tc["id"], "content": truncated})
-
-        # Max iterations
-        messages.append({"role": "user", "content": "Please provide your final answer."})
-        for token in self._stream_final(llm, messages, tools=[]):
-            yield {"event": "token", "data": {"token": token}}
-        citations = self._extract_citations(tool_steps)
-        yield {"event": "citations", "data": {"citations": citations}}
-        yield {"event": "done", "data": {"tool_steps": tool_steps}}
-
-    def _call_with_tools(self, llm, messages, tools):
-        if not llm._client:
-            raise RuntimeError("LLM client not initialized")
-        kwargs = {"model": llm.model, "messages": messages, "temperature": 0.3, "max_tokens": 2048}
-        if tools:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
-        try:
-            response = llm._client.chat.completions.create(**kwargs)
-            choice = response.choices[0]
-            if choice.message.tool_calls:
-                return {"type": "tool_calls", "tool_calls": [
-                    {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                    for tc in choice.message.tool_calls
-                ]}
-            return {"type": "text", "content": choice.message.content or ""}
-        except Exception as e:
-            return {"type": "text", "content": f"Error: {e}"}
-
-    def _stream_final(self, llm, messages, tools=None):
-        if not llm._client:
-            yield "Error: LLM client not initialized"
-            return
-        kwargs = {"model": llm.model, "messages": messages, "temperature": 0.5, "max_tokens": 2048, "stream": True}
-        try:
-            stream = llm._client.chat.completions.create(**kwargs)
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-        except Exception as e:
-            yield f"Error: {e}"
-
-    def _extract_citations(self, tool_steps):
-        import re
-        citations = []
-        seen = set()
-        for step in tool_steps:
-            if step["tool"] == "search_knowledge":
-                pattern = r'\[Result \d+\]\s*\((\w+)\)\s*"([^"]+)"\s*\[(\d+:\d+)\s*-\s*(\d+:\d+)\]'
-                for match in re.finditer(pattern, step.get("result", "")):
-                    ctype, title, begin_str, end_str = match.groups()
-                    bp = begin_str.split(":")
-                    ep = end_str.split(":")
-                    begin_time = int(bp[0]) * 60 + int(bp[1])
-                    end_time = int(ep[0]) * 60 + int(ep[1])
-                    key = f"{title}-{begin_time}"
-                    if key not in seen:
-                        seen.add(key)
-                        citations.append({
-                            "source_num": len(citations) + 1,
-                            "title": title, "begin_time": float(begin_time),
-                            "end_time": float(end_time), "type": ctype, "relevance": 0.8,
-                        })
-        return citations
-
-
 # ======================
 # TASK RETRY
 # ======================
 
+# CSRF exempt: SSE streaming endpoints cannot send CSRF tokens via EventSource.
+# Security should be handled by API key/token authentication instead.
 @csrf_exempt
 @api_view(['POST'])
 def task_retry_view(request, pk):

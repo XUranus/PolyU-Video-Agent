@@ -185,12 +185,16 @@ const LectureChatBot: React.FC<LectureChatBotProps> = ({ videoId, handleTimeClic
         buffer = lines.pop() || '';
 
         let currentEvent = '';
+        let dataBuffer = '';
         for (const line of lines) {
           if (line.startsWith('event: ')) {
             currentEvent = line.slice(7).trim();
           } else if (line.startsWith('data: ')) {
+            dataBuffer += (dataBuffer ? '\n' : '') + line.slice(6);
+          } else if (line === '' && dataBuffer) {
+            // Empty line = end of SSE event, process it
             try {
-              const data = JSON.parse(line.slice(6));
+              const data = JSON.parse(dataBuffer);
 
               switch (currentEvent) {
                 case 'thinking':
@@ -269,7 +273,92 @@ const LectureChatBot: React.FC<LectureChatBotProps> = ({ videoId, handleTimeClic
               // skip unparseable
             }
             currentEvent = '';
+            dataBuffer = '';
           }
+        }
+        // Process any remaining buffered event
+        if (dataBuffer) {
+          try {
+            const data = JSON.parse(dataBuffer);
+
+            switch (currentEvent) {
+              case 'thinking':
+                setCurrentThinking(data.thought || null);
+                break;
+
+              case 'tool_call':
+                setCurrentThinking(null);
+                setCurrentToolSteps(prev => [
+                  ...prev,
+                  { tool: data.tool, args: data.args },
+                ]);
+                break;
+
+              case 'tool_result':
+                setCurrentToolSteps(prev => {
+                  const updated = [...prev];
+                  const last = updated.length - 1;
+                  if (last >= 0 && updated[last].tool === data.tool) {
+                    updated[last] = { ...updated[last], result: data.result };
+                  }
+                  return updated;
+                });
+                break;
+
+              case 'token':
+                setCurrentThinking(null);
+                if (data.token) {
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantId
+                      ? { ...msg, content: msg.content + data.token }
+                      : msg
+                  ));
+                }
+                break;
+
+              case 'citations':
+                if (data.citations) {
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantId
+                      ? { ...msg, citations: data.citations }
+                      : msg
+                  ));
+                }
+                break;
+
+              case 'done':
+                if (data.tool_steps) {
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantId
+                      ? { ...msg, toolSteps: data.tool_steps }
+                      : msg
+                  ));
+                }
+                setCurrentToolSteps([]);
+                break;
+
+              case 'complete':
+                if (data.session_id) setSessionId(data.session_id);
+                if (data.message_id) {
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantId ? { ...msg, id: data.message_id } : msg
+                  ));
+                }
+                break;
+
+              case 'error':
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantId
+                    ? { ...msg, content: `Error: ${data.error}` }
+                    : msg
+                ));
+                break;
+            }
+          } catch {
+            // skip
+          }
+          currentEvent = '';
+          dataBuffer = '';
         }
       }
     } catch (err: any) {

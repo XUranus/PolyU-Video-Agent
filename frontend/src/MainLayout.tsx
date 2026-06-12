@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 
-import { Layout, Menu, Button, Progress } from 'antd';
+import { Layout, Menu, Button } from 'antd';
 import {
   HomeOutlined,
   VideoCameraOutlined,
@@ -13,7 +13,6 @@ import {
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 
-import PlayGround from './components/PlayGround';
 import LectureVideoAnalysis from './page/LectureVideoAnalysis';
 import UploadDashboard from './page/UploadDashboard';
 import TaskDashboard from './page/TaskDashboard';
@@ -21,6 +20,7 @@ import CourseDashboard from './page/CourseDashboard';
 import CourseDetailPage from './page/CourseDetailPage';
 import VideoDashboard from './page/VideoDashboard';
 import SettingsPage from './page/SettingsPage';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const { Header, Sider, Content } = Layout;
 
@@ -53,7 +53,6 @@ const AppShell: React.FC = () => {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(true);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [isUploading] = useState(false);
 
   const selectedKey = linkToMenuKey(location.pathname);
 
@@ -75,11 +74,6 @@ const AppShell: React.FC = () => {
           <h1 className="ml-4 text-xl font-bold text-gray-800">LectureMind</h1>
         </div>
         <div className="flex items-center space-x-4">
-          {isUploading && (
-            <div className="w-40">
-              <Progress percent={uploadProgress} size="small" />
-            </div>
-          )}
         </div>
       </Header>
 
@@ -95,16 +89,17 @@ const AppShell: React.FC = () => {
         </Sider>
 
         <Content className="p-6 overflow-auto" style={{ height: 'calc(100vh - 64px)' }}>
-          <Routes>
-            <Route path="/" element={<UploadDashboard setUploadProgress={setUploadProgress} />} />
-            <Route path="/courses" element={<CourseDashboard />} />
-            <Route path="/courses/:courseId" element={<CourseDetailPage />} />
-            <Route path="/tasks" element={<TaskDashboard />} />
-            <Route path="/videos" element={<VideoDashboard />} />
-            <Route path="/lecture/:videoId" element={<LectureVideoAnalysis />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/playground" element={<PlayGround videoId="113514" />} />
-          </Routes>
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<UploadDashboard setUploadProgress={setUploadProgress} />} />
+              <Route path="/courses" element={<CourseDashboard />} />
+              <Route path="/courses/:courseId" element={<CourseDetailPage />} />
+              <Route path="/tasks" element={<TaskDashboard />} />
+              <Route path="/videos" element={<VideoDashboard />} />
+              <Route path="/lecture/:videoId" element={<LectureVideoAnalysis />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </ErrorBoundary>
         </Content>
       </Layout>
     </Layout>
